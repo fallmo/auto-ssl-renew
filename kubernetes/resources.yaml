@@ -1,0 +1,91 @@
+# NAMESPACE
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-automation
+---
+# SERVICE ACCOUNT
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: cert-sa
+  namespace: cert-automation
+---
+# ALLOW SCC TO RUN AS ROOT
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:openshift:scc:anyuid
+  namespace: cert-automation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:anyuid
+subjects:
+- kind: ServiceAccount
+  name: cert-sa
+  namespace: cert-automation
+---
+# GIVE SCC ACCESS TO openshift-ingress project
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: openshift-ingress
+  name: cert-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+- kind: ServiceAccount
+  name: cert-sa
+  namespace: cert-automation
+---
+# GIVE SCC ACCESS TO openshift-ingress-operator project
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: openshift-ingress-operator
+subjects:
+- kind: ServiceAccount
+  name: cert-sa
+  namespace: cert-automation
+---
+# CRONJOB to run container
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: autocert
+  namespace: cert-automation
+spec:
+  schedule: "0 0 3 */2 *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: cert-sa
+          securityContext:
+            runAsUser: 0
+          volumes:
+            - name: config
+              secret:
+                secretName: do-secret # oc create secret generic do-secret --from-file digital-ocean.ini=/path/to/ini -n cert-automation
+          containers:
+          - name: autocert
+            image: quay.io/mohamedf0/autocert:latest
+            imagePullPolicy: Always
+            volumeMounts:
+            - name: config
+              mountPath: /config
+            env:
+            - name: CLUSTER_DOMAIN
+              value: origins.heritage.africa
+            - name: EMAIL
+              value: mohamed.fall@accel-tech.net
+          restartPolicy: OnFailure
