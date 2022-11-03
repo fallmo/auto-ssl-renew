@@ -91,7 +91,7 @@ export async function updateSecret() {
       method: update ? "PUT" : "POST",
       headers: {
         Authorization: `Bearer ${sa_token}`,
-        "Content-Type": update ? "application/merge-patch+json" : "application/json",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(secret),
     }
