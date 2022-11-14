@@ -4,6 +4,36 @@ kind: Namespace
 metadata:
   name: cert-automation
 ---
+# ROLE FOR EDITING APISERVER
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: apiserver-editor
+rules:
+- apiGroups:
+  - config.openshift.io
+  resources:
+  - apiservers
+  resourceNames:
+  - cluster
+  verbs:
+  - get
+  - patch
+---
+# ROLE BINDING FOR EDITING APISERVER
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: apiserver-editor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: apiserver-editor
+subjects:
+- kind: ServiceAccount
+  name: cert-sa
+  namespace: cert-automation
+---
 # SERVICE ACCOUNT
 kind: ServiceAccount
 apiVersion: v1

@@ -1,10 +1,9 @@
-import { exec } from "https://deno.land/x/exec/mod.ts";
-
-import { TLS_NAMESPACE, CTLR_NAMESPACE, TLS_SECRET_NAME, DO_CONFIG_PATH } from "./constants.ts";
+import { TLS_BASENAME, DO_CONFIG_PATH } from "./constants.ts";
+import { uniqueString } from "https://deno.land/x/uniquestring/mod.ts";
 
 export async function checkEnvironment() {
   console.log("!! Checking Environment Variables...");
-  const varsNeeded = ["EMAIL", "CLUSTER_DOMAIN"];
+  const varsNeeded = ["EMAIL", "BASE_DOMAIN", "CLUSTER_NAME"];
 
   for (const varName of varsNeeded) {
     if (Deno.env.get(varName)) continue;
@@ -23,24 +22,85 @@ export async function checkEnvironment() {
   }
 }
 
-export async function generateCertificates() {
-  console.log("!! Generating Certificates...");
-  const email = Deno.env.get("EMAIL")!.trim();
-  const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
-
-  await exec(`certbot-3 certonly \ 
-  --non-interactive --agree-tos ${Deno.env.get("TEST") ? "--test-cert" : ""}\
-  --dns-digitalocean --dns-digitalocean-credentials ${DO_CONFIG_PATH} --dns-digitalocean-propagation-seconds 15 \
-  --email ${email} \
-  --domains "*.apps.${cluster_domain}"`);
-}
-
-export async function updateSecret() {
-  console.log(`!! Updating the tls secret ...`);
-  const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
-
+export async function setAdditionalVars() {
   const token_file = await Deno.readFile("/var/run/secrets/kubernetes.io/serviceaccount/token");
   const sa_token = new TextDecoder("utf-8").decode(token_file);
+
+  Deno.env.set("SA_TOKEN", sa_token);
+
+  const base_domain = Deno.env.get("BASE_DOMAIN")!.trim();
+  const cluster_name = Deno.env.get("CLUSTER_NAME")!.trim();
+  const cluster_domain = cluster_name + "." + base_domain;
+
+  Deno.env.set("CLUSTER_DOMAIN", cluster_domain);
+
+  Deno.env.set("TLS_SECRET_NAME", TLS_BASENAME + "-" + uniqueString(5).toLowerCase());
+
+  const currentIngress = await fetch(
+    `https://api.${cluster_domain}:6443/apis/operator.openshift.io/v1/namespaces/openshift-ingress-operator/ingresscontrollers/default`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${sa_token}`,
+      },
+    }
+  );
+  if (currentIngress.status !== 200) {
+    console.log(`Status getting current ingress: ${currentIngress.status}`);
+    Deno.exit(1);
+  }
+  const data = await currentIngress.json();
+  Deno.env.set("OLD_CERTS", data.spec.defaultCertificate.name);
+}
+
+export async function generateCertificates() {
+  console.log("!! Generating Certificates..");
+  const email = Deno.env.get("EMAIL")!.trim();
+  const domain = Deno.env.get("BASE_DOMAIN")!.trim();
+  const cluster_name = Deno.env.get("CLUSTER_NAME")!.trim();
+
+  const cmd = [
+    "certbot-3",
+    "certonly",
+    "--non-interactive",
+    "--agree-tos",
+    "--dns-digitalocean",
+    "--dns-digitalocean-credentials",
+    DO_CONFIG_PATH,
+    "--email",
+    email,
+    "-d",
+    `*.apps.${cluster_name}.${domain}`,
+    "-d",
+    `*.${cluster_name}.${domain}`,
+    "-d",
+    `*.${domain}`,
+    "-d",
+    `${domain}`,
+  ];
+
+  if (Deno.env.get("TEST")) cmd.push("--test-cert");
+
+  const command = Deno.run({
+    cmd,
+    stdout: "piped",
+  });
+
+  const status = await command.status();
+
+  const output = await command.output();
+
+  console.log(new TextDecoder().decode(output));
+
+  return status;
+}
+
+export async function updateTLSSecrets() {
+  console.log(`!! Creating new tls secrets ...`);
+
+  const sa_token = Deno.env.get("SA_TOKEN");
+  const cluster_domain = Deno.env.get("CLUSTER_DOMAIN");
+  const tls_secret_name = Deno.env.get("TLS_SECRET_NAME");
 
   const crt = new TextDecoder("utf-8").decode(
     await Deno.run({
@@ -61,8 +121,7 @@ export async function updateSecret() {
     kind: "Secret",
     type: "kubernetes.io/tls",
     metadata: {
-      name: TLS_SECRET_NAME,
-      namespace: TLS_NAMESPACE,
+      name: tls_secret_name,
       labels: {
         "created-via-automation": "true",
       },
@@ -72,46 +131,35 @@ export async function updateSecret() {
       "tls.key": key,
     },
   };
+  const namespaces = ["openshift-ingress", "openshift-config"];
 
-  const checkExisting = await fetch(
-    `https://api.${cluster_domain}:6443/api/v1/namespaces/${TLS_NAMESPACE}/secrets/${TLS_SECRET_NAME}`,
-    {
-      method: "GET",
-      headers: { Authorization: `Bearer ${sa_token}` },
-    }
-  );
-
-  const update = checkExisting.status === 404 ? false : true;
-
-  const result = await fetch(
-    `https://api.${cluster_domain}:6443/api/v1/namespaces/${TLS_NAMESPACE}/secrets${
-      update ? `/${TLS_SECRET_NAME}` : ""
-    }`,
-    {
-      method: update ? "PUT" : "POST",
+  for (const namespace of namespaces) {
+    const result = await fetch(`https://api.${cluster_domain}:6443/api/v1/namespaces/${namespace}/secrets`, {
+      method: "POST",
       headers: {
         Authorization: `Bearer ${sa_token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(secret),
-    }
-  );
+    });
 
-  console.log(`Result ${update ? "updating" : "creating"} tls secret: '${TLS_SECRET_NAME}' status: ${result.status}`);
+    console.log(
+      `Result creating tls secret: '${tls_secret_name}' in namespace: '${namespace}' status: ${result.status}`
+    );
+  }
 }
 
 export async function updateIngress() {
   console.log("!! Updating the ingress controller defaultCert...");
 
+  const sa_token = Deno.env.get("SA_TOKEN");
   const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
+  const tls_secret_name = Deno.env.get("TLS_SECRET_NAME");
 
-  const token_file = await Deno.readFile("/var/run/secrets/kubernetes.io/serviceaccount/token");
-  const sa_token = new TextDecoder("utf-8").decode(token_file);
-
-  const patch = { spec: { defaultCertificate: { name: TLS_SECRET_NAME } } };
+  const patch = { spec: { defaultCertificate: { name: tls_secret_name } } };
 
   const result = await fetch(
-    `https://api.${cluster_domain}:6443/apis/operator.openshift.io/v1/namespaces/${CTLR_NAMESPACE}/ingresscontrollers/default`,
+    `https://api.${cluster_domain}:6443/apis/operator.openshift.io/v1/namespaces/openshift-ingress-operator/ingresscontrollers/default`,
     {
       method: "PATCH",
       headers: {
@@ -123,6 +171,56 @@ export async function updateIngress() {
   );
 
   console.log(`Result patching default ingress controller status: ${result.status}`);
+}
+
+export async function updateAPI() {
+  console.log("!! Updating API servingCerts...");
+
+  const sa_token = Deno.env.get("SA_TOKEN");
+  const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
+  const tls_secret_name = Deno.env.get("TLS_SECRET_NAME");
+
+  const patch = {
+    spec: {
+      servingCerts: {
+        namedCertificates: [{ names: [`api.${cluster_domain}`], servingCertificate: { name: tls_secret_name } }],
+      },
+    },
+  };
+
+  const result = await fetch(`https://api.${cluster_domain}:6443/apis/config.openshift.io/v1/apiservers/cluster`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${sa_token}`,
+      "Content-Type": "application/merge-patch+json",
+    },
+    body: JSON.stringify(patch),
+  });
+
+  console.log(`Result patching api status: ${result.status}`);
+}
+
+export async function deleteOldCertificate() {
+  const sa_token = Deno.env.get("SA_TOKEN");
+  const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
+
+  const old_secret_name = Deno.env.get("OLD_CERTS")!;
+
+  const namespaces = ["openshift-ingress", "openshift-config"];
+
+  for (const namespace of namespaces) {
+    const result = await fetch(
+      `https://api.${cluster_domain}:6443/api/v1/namespaces/${namespace}/secrets/${old_secret_name}`,
+      {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${sa_token}` },
+      }
+    );
+
+    console.log(
+      `Result deleting tls secret: '${old_secret_name}' in namespace: '${namespace}' status: ${result.status}`
+    );
+  }
 }
 
 export function wait(ms = 2000) {
