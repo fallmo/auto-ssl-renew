@@ -200,6 +200,40 @@ export async function updateAPI() {
   console.log(`Result patching api status: ${result.status}`);
 }
 
+export async function updateConsole() {
+  console.log("!! Updating Console servingCertKeyPairSecret...");
+
+  const sa_token = Deno.env.get("SA_TOKEN");
+  const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
+  const tls_secret_name = Deno.env.get("TLS_SECRET_NAME");
+
+  const patch = {
+    spec: {
+      componentRoutes: [
+        {
+          name: "console",
+          namespace: "openshift-console",
+          hostname: "openshift.heritage.africa",
+          servingCertKeyPairSecret: {
+            name: tls_secret_name,
+          },
+        },
+      ],
+    },
+  };
+
+  const result = await fetch(`https://api.${cluster_domain}:6443/apis/config.openshift.io/v1/ingresses/cluster`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${sa_token}`,
+      "Content-Type": "application/merge-patch+json",
+    },
+    body: JSON.stringify(patch),
+  });
+
+  console.log(`Result patching api status: ${result.status}`);
+}
+
 export async function deleteOldCertificate() {
   const sa_token = Deno.env.get("SA_TOKEN");
   const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();

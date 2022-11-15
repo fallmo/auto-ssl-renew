@@ -7,6 +7,7 @@ import {
   updateAPI,
   wait,
   deleteOldCertificate,
+  updateConsole,
 } from "./functions.ts";
 
 console.log(`Mission Start...\n`);
@@ -30,6 +31,8 @@ await wait();
 await updateIngress();
 
 await updateAPI();
+
+await updateConsole();
 
 await deleteOldCertificate();
 
