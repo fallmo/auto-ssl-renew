@@ -204,6 +204,7 @@ export async function updateConsole() {
   console.log("!! Updating Console servingCertKeyPairSecret...");
 
   const sa_token = Deno.env.get("SA_TOKEN");
+  const base_domain = Deno.env.get("BASE_DOMAIN")!.trim();
   const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
   const tls_secret_name = Deno.env.get("TLS_SECRET_NAME");
 
@@ -213,7 +214,7 @@ export async function updateConsole() {
         {
           name: "console",
           namespace: "openshift-console",
-          hostname: "openshift.heritage.africa",
+          hostname: `origins.${base_domain}`,
           servingCertKeyPairSecret: {
             name: tls_secret_name,
           },
