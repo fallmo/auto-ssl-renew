@@ -1,4 +1,4 @@
-import { TLS_BASENAME, DO_CONFIG_PATH } from "./constants.ts";
+import { TLS_BASENAME, CF_CONFIG_PATH } from "./constants.ts";
 import { uniqueString } from "https://deno.land/x/uniquestring/mod.ts";
 
 export async function checkEnvironment() {
@@ -11,10 +11,10 @@ export async function checkEnvironment() {
     Deno.exit(1);
   }
 
-  const cfgFile = Deno.run({ cmd: ["cat", DO_CONFIG_PATH], stdout: "piped" });
+  const cfgFile = Deno.run({ cmd: ["cat", CF_CONFIG_PATH], stdout: "piped" });
   const status = await cfgFile.status();
   if (!status) {
-    console.error(`Failed to read ${DO_CONFIG_PATH}`);
+    console.error(`Failed to read ${CF_CONFIG_PATH}`);
     Deno.exit(1);
   }
   if (Deno.env.get("TEST")) {
@@ -64,9 +64,9 @@ export async function generateCertificates() {
     "certonly",
     "--non-interactive",
     "--agree-tos",
-    "--dns-digitalocean",
-    "--dns-digitalocean-credentials",
-    DO_CONFIG_PATH,
+    "--dns-cloudflare",
+    "--dns-cloudflare-credentials",
+    CF_CONFIG_PATH,
     "--email",
     email,
     "-d",

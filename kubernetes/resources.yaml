@@ -106,7 +106,7 @@ spec:
           volumes:
             - name: config
               secret:
-                secretName: do-secret # oc create secret generic do-secret --from-file digital-ocean.ini=/path/to/ini -n cert-automation
+                secretName: cf-secret # oc create secret generic cf-secret --from-file cloudflare.ini=/path/to/ini -n cert-automation
           containers:
           - name: autocert
             image: quay.io/mohamedf0/autocert:latest

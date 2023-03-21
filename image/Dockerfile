@@ -1,6 +1,6 @@
 FROM fedora:37
 
-RUN yum update -y && yum install -y certbot.noarch python3-certbot-dns-digitalocean.noarch
+RUN yum update -y && yum install -y certbot.noarch python3-certbot-dns-cloudflare.noarch
 
 COPY ./entrypoint .
 
