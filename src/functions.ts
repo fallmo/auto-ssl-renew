@@ -50,7 +50,7 @@ export async function setAdditionalVars() {
     Deno.exit(1);
   }
   const data = await currentIngress.json();
-  Deno.env.set("OLD_CERTS", data.spec.defaultCertificate.name);
+  if (data.spec.defaultCertificate) Deno.env.set("OLD_CERTS", data.spec.defaultCertificate.name);
 }
 
 export async function generateCertificates() {
@@ -214,7 +214,7 @@ export async function updateConsole() {
         {
           name: "console",
           namespace: "openshift-console",
-          hostname: `origins.${base_domain}`,
+          hostname: `${cluster_domain}`,
           servingCertKeyPairSecret: {
             name: tls_secret_name,
           },
@@ -240,6 +240,10 @@ export async function deleteOldCertificate() {
   const cluster_domain = Deno.env.get("CLUSTER_DOMAIN")!.trim();
 
   const old_secret_name = Deno.env.get("OLD_CERTS")!;
+  if (!old_secret_name) {
+    console.log("No previous secret");
+    return;
+  }
 
   const namespaces = ["openshift-ingress", "openshift-config"];
 
